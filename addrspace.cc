@@ -18,6 +18,7 @@
 #include "copyright.h"
 #include "system.h"
 #include "addrspace.h"
+#include "syscall.h"
 #include "noff.h"
 #ifdef HOST_SPARC
 #include <strings.h>
@@ -59,13 +60,9 @@ SwapHeader (NoffHeader *noffH)
 //
 //	"executable" is the file containing the object code to load into memory
 //----------------------------------------------------------------------
-// Begin code made by Joseph Aucoin
-// Added a bitmap class to track what memory is being used currently
-#include "bitmap.h"
-BitMap* bMap;
+
 AddrSpace::AddrSpace(OpenFile *executable)
 {
-
     NoffHeader noffH;
     unsigned int i, size;
 
@@ -81,50 +78,121 @@ AddrSpace::AddrSpace(OpenFile *executable)
 						// to leave room for the stack
     numPages = divRoundUp(size, PageSize);
     size = numPages * PageSize;
-		bMap = new BitMap(size);
-
 
     ASSERT(numPages <= NumPhysPages);		// check we're not trying
 						// to run anything too big --
 						// at least until we have
 						// virtual memory
-
     DEBUG('a', "Initializing address space, num pages %d, size %d\n",
 					numPages, size);
 // first, set up the translation
     pageTable = new TranslationEntry[numPages];
-    for (i = 0; i < numPages; i++) {
-	pageTable[i].virtualPage = i;	// for now, virtual page # = phys page #
-	pageTable[i].physicalPage = i;
-	pageTable[i].valid = TRUE;
-	pageTable[i].use = FALSE;
-	pageTable[i].dirty = FALSE;
-	pageTable[i].readOnly = FALSE;  // if the code segment was entirely on
-					// a separate page, we could set its
-					// pages to be read-only
-					bMap->Mark(i);
-    }
-	  bMap->Print();
-		// End code made by Joseph Aucoin
 
-// zero out the entire address space, to zero the unitialized data segment
-// and the stack segment
-    bzero(machine->mainMemory, size);
+		//Begin Code Changes by Chau Cao
 
-// then, copy in the code and data segments into memory
+		//memIndex is used to store the starting point of the memory allocated
+		//for the user program.
+		int memIndex = 0;
+		//tempIndex variable used to iterate through loop an indices of main memory
+		int tempIndex;
+
+		//Print out the bitmap before attempting to bring the user program into memory
+		memMap->Print();
+
+		//check if the number of pages needed is greater than the number of available frames
+		//in memory. If numPages is greater, produce output stating that and Exit()
+		if(numPages > memMap->NumClear()) {
+			printf("There is not enough memeory available for the requested process\n");
+			//Exit(-1);
+		}
+		//else assign the pageTable values for the Virtual Address and take available
+		//frames in main memory. Mark the appropriate bits as used.
+		else {
+			//Begin code added by joseph aucoin
+			int indexStart = 0;
+			int indexEnd = 0;
+			int currentCount = 0;
+			int maxCount = 0;
+			int indexMaxStart = 0;
+			for (int x = 0; x < numPages; x++)
+			{
+				if(memMap->Test(x) == FALSE)
+				{
+					if(currentCount == 0)
+					{
+						indexStart = x;
+					}
+					currentCount++;
+				}else if(memMap->Test(x) == TRUE)
+				{
+					if(currentCount > maxCount)
+					{
+						maxCount = currentCount;
+						indexEnd = x - 1;
+						indexMaxStart = indexStart;
+						currentCount = 0;
+					}
+				}
+				if(maxCount >= numPages)
+				{
+					break;
+				}
+			}
+			printf("max %d instart %d inend %d\n",maxCount,indexEnd,indexMaxStart);
+			// end code added by joseph auucoin
+
+			//loops through the number of pages that need to be placed into main memory.
+			//Virtual Page in page table is just the current index.
+			//Physical Page: Loop through mainMemory searching for available memory. When
+			//	found the start of the memoryblock is found, place that value into memIndex
+			//Mark the coinciding bit in memMap as used, and assign that location to Physical Page
+			//Call bzero on that location in mainMemory to clear that frame of size 256 for the
+			//	instructions being stored then break
+			//THe reset of the assignemnts mimic the one provided in the base exception
+
+			for (int x = 0; x < numPages; x++) {
+				pageTable[x].virtualPage = x;
+				tempIndex = 0;
+				for (int y = 0; y < NumPhysPages; y++) {
+					if(memMap->Test(y) == true) {
+						tempIndex = tempIndex + 256;
+					}
+					else
+					{
+						if(x == 0) {
+							memIndex = tempIndex;
+						}
+						memMap->Mark(y);
+						pageTable[x].physicalPage = y;
+						bzero(machine->mainMemory + tempIndex, 256);
+						break;
+					}
+				}
+				pageTable[x].valid = true;
+				pageTable[x].use = false;
+				pageTable[x].dirty = false;
+				pageTable[x].readOnly = false;
+			}
+
+		}
+
+		//Calls OpenFile.ReadAt to pull the instructions and initData that needs to be
+		//	read into memory.
+		//The code instructions are read in and stored starting at memIndex
+		//The init data are read in after at the location referenced by memIndex + code.size
     if (noffH.code.size > 0) {
-        DEBUG('a', "Initializing code segment, at 0x%x, size %d\n",
-			noffH.code.virtualAddr, noffH.code.size);
-        executable->ReadAt(&(machine->mainMemory[noffH.code.virtualAddr]),
-			noffH.code.size, noffH.code.inFileAddr);
+    	DEBUG('a', "Initializing code segment, at 0x%x, size %d\n",noffH.code.virtualAddr, noffH.code.size);
+			executable->ReadAt(machine->mainMemory+memIndex, noffH.code.size, noffH.code.inFileAddr);
     }
     if (noffH.initData.size > 0) {
-        DEBUG('a', "Initializing data segment, at 0x%x, size %d\n",
-			noffH.initData.virtualAddr, noffH.initData.size);
-        executable->ReadAt(&(machine->mainMemory[noffH.initData.virtualAddr]),
-			noffH.initData.size, noffH.initData.inFileAddr);
+      DEBUG('a', "Initializing data segment, at 0x%x, size %d\n", noffH.initData.virtualAddr, noffH.initData.size);
+			executable->ReadAt(machine->mainMemory + (memIndex + noffH.code.size),noffH.initData.size, noffH.initData.inFileAddr);
     }
 
+		//Print out the bitmap after allocating the user program
+		memMap->Print();
+
+		//End changes by Chau Cao
 }
 
 //----------------------------------------------------------------------
