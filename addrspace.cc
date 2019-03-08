@@ -63,14 +63,18 @@ SwapHeader (NoffHeader *noffH)
 
 AddrSpace::AddrSpace(OpenFile *executable)
 {
+	  printf("-M in address = %d\n", currentIdGlobal);
     NoffHeader noffH;
     unsigned int i, size;
 
     executable->ReadAt((char *)&noffH, sizeof(noffH), 0);
-    if ((noffH.noffMagic != NOFFMAGIC) &&
-		(WordToHost(noffH.noffMagic) == NOFFMAGIC))
+    if ((noffH.noffMagic != NOFFMAGIC) && (WordToHost(noffH.noffMagic) == NOFFMAGIC))
     	SwapHeader(&noffH);
-    ASSERT(noffH.noffMagic == NOFFMAGIC);
+		if(noffH.noffMagic != NOFFMAGIC) {
+			printf("There is a noff error with the desired user program. Exiting\n");
+			Exit(-2);//MAKE THIS MEANINGFUL
+		}
+    //ASSERT(noffH.noffMagic == NOFFMAGIC);
 
 // how big is address space?
     size = noffH.code.size + noffH.initData.size + noffH.uninitData.size
@@ -79,7 +83,11 @@ AddrSpace::AddrSpace(OpenFile *executable)
     numPages = divRoundUp(size, PageSize);
     size = numPages * PageSize;
 
-    ASSERT(numPages <= NumPhysPages);		// check we're not trying
+		if(numPages > NumPhysPages) {
+			printf("The desired user program is bigger than physical memory can accept without virtual memory. Exiting\n");
+			Exit(-3);//MAKE THIS MEANINGFUL
+		}
+    //ASSERT(numPages <= NumPhysPages);		// check we're not trying
 						// to run anything too big --
 						// at least until we have
 						// virtual memory
@@ -90,58 +98,33 @@ AddrSpace::AddrSpace(OpenFile *executable)
 
 		//Begin Code Changes by Chau Cao
 
-		//memIndex is used to store the starting point of the memory allocated
-		//for the user program.
-		int memIndex = 0;
-		//tempIndex variable used to iterate through loop an indices of main memory
-		int tempIndex;
-
 		//Print out the bitmap before attempting to bring the user program into memory
+		if(memMap == NULL){
+			printf("CRITICAL ERROR: GLOBAL BITMAP IS NULL. HOW DID THIS HAPPEN?!\n");
+			Exit(-4);//legit don't know how this could happen but who knows
+		}
+		printf("Page availability before adding the process:\n");
 		memMap->Print();
 
 		//check if the number of pages needed is greater than the number of available frames
 		//in memory. If numPages is greater, produce output stating that and Exit()
 		if(numPages > memMap->NumClear()) {
 			printf("There is not enough memeory available for the requested process\n");
-			//Exit(-1);
+			Exit(-1);//MAKE THIS MEANINGFUL
 		}
 		//else assign the pageTable values for the Virtual Address and take available
 		//frames in main memory. Mark the appropriate bits as used.
 		else {
-			//Begin code added by joseph aucoin
-			int indexStart = 0;
-			int indexEnd = 0;
-			int currentCount = 0;
-			int maxCount = 0;
-			int indexMaxStart = 0;
-			for (int x = 0; x < numPages; x++)
-			{
-				if(memMap->Test(x) == FALSE)
-				{
-					if(currentCount == 0)
-					{
-						indexStart = x;
-					}
-					currentCount++;
-				}else if(memMap->Test(x) == TRUE)
-				{
-					if(currentCount > maxCount)
-					{
-						maxCount = currentCount;
-						indexEnd = x - 1;
-						indexMaxStart = indexStart;
-						currentCount = 0;
-					}
-				}
-				if(maxCount >= numPages)
-				{
-					break;
-				}
+			//**********Place Fit Alogorithm calls here and place memIndex equal to the return value************
+			memIndex = 0; //setting it to 0 for now for compilation and usability of single user processes
+			if(memIndex == -1) {
+				printf("There is not a large enough contiguous block of memory for the requested process\n");
+				//Exit this gracefully pls
 			}
-			printf("max %d instart %d inend %d\n",maxCount,indexEnd,indexMaxStart);
-			// end code added by joseph auucoin
-
-			//loops through the number of pages that need to be placed into main memory.
+			else {
+				setMemory();
+			}
+			/*//loops through the number of pages that need to be placed into main memory.
 			//Virtual Page in page table is just the current index.
 			//Physical Page: Loop through mainMemory searching for available memory. When
 			//	found the start of the memoryblock is found, place that value into memIndex
@@ -149,7 +132,6 @@ AddrSpace::AddrSpace(OpenFile *executable)
 			//Call bzero on that location in mainMemory to clear that frame of size 256 for the
 			//	instructions being stored then break
 			//THe reset of the assignemnts mimic the one provided in the base exception
-
 			for (int x = 0; x < numPages; x++) {
 				pageTable[x].virtualPage = x;
 				tempIndex = 0;
@@ -172,7 +154,7 @@ AddrSpace::AddrSpace(OpenFile *executable)
 				pageTable[x].use = false;
 				pageTable[x].dirty = false;
 				pageTable[x].readOnly = false;
-			}
+			}*/
 
 		}
 
@@ -180,16 +162,24 @@ AddrSpace::AddrSpace(OpenFile *executable)
 		//	read into memory.
 		//The code instructions are read in and stored starting at memIndex
 		//The init data are read in after at the location referenced by memIndex + code.size
+		if(executable == NULL)
+		{
+			printf("Executable is null. Exiting\n");
+			Exit(-4);
+		}
     if (noffH.code.size > 0) {
     	DEBUG('a', "Initializing code segment, at 0x%x, size %d\n",noffH.code.virtualAddr, noffH.code.size);
-			executable->ReadAt(machine->mainMemory+memIndex, noffH.code.size, noffH.code.inFileAddr);
-    }
-    if (noffH.initData.size > 0) {
-      DEBUG('a', "Initializing data segment, at 0x%x, size %d\n", noffH.initData.virtualAddr, noffH.initData.size);
-			executable->ReadAt(machine->mainMemory + (memIndex + noffH.code.size),noffH.initData.size, noffH.initData.inFileAddr);
+			executable->ReadAt(machine->mainMemory+(memIndex*256), noffH.code.size, noffH.code.inFileAddr);
     }
 
+    if (noffH.initData.size > 0) {
+      DEBUG('a', "Initializing data segment, at 0x%x, size %d\n", noffH.initData.virtualAddr, noffH.initData.size);
+			executable->ReadAt(machine->mainMemory + ((memIndex*256) + noffH.code.size),noffH.initData.size, noffH.initData.inFileAddr);
+    }
+
+
 		//Print out the bitmap after allocating the user program
+		printf("Page availability after adding the process:\n");
 		memMap->Print();
 
 		//End changes by Chau Cao
@@ -202,7 +192,7 @@ AddrSpace::AddrSpace(OpenFile *executable)
 
 AddrSpace::~AddrSpace()
 {
-   delete pageTable;
+   delete [] pageTable;
 }
 
 //----------------------------------------------------------------------
@@ -215,25 +205,51 @@ AddrSpace::~AddrSpace()
 //	when this thread is context switched out.
 //----------------------------------------------------------------------
 
+
+//setMemory function for address space constructor
+//Begin Code Changes by Chau Cao
+void AddrSpace::setMemory() {
+	//loops through the number of pages that need to be placed into main memory.
+	//Virtual Page in page table is just the current index.
+	//Physical Page: startIndex is the starting index of the found contiguous memory
+	//use this as the offset and increment by x while assigning the following.
+	//Mark the coinciding bit in memMap as used, and assign that location to Physical Page
+	//Call bzero on that location in mainMemory to clear that frame of size 256 for the
+	//	instructions being stored then break
+	//The assignemnts mimic the one provided in the base exception
+	int startIndex = memIndex;
+	printf("Index %d\n", memIndex);
+	for (int x = 0; x < numPages; x++) {
+		pageTable[x].virtualPage = x;
+		memMap->Mark(startIndex + x);
+		pageTable[x].physicalPage = startIndex + x;
+		bzero(machine->mainMemory + (startIndex * 256), 256);
+		pageTable[x].valid = true;
+		pageTable[x].use = false;
+		pageTable[x].dirty = false;
+		pageTable[x].readOnly = false;
+	}
+}
+//end code changes by Chau Cao
 void
 AddrSpace::InitRegisters()
 {
     int i;
 
-    for (i = 0; i < NumTotalRegs; i++)
-	machine->WriteRegister(i, 0);
-
+    for (i = 0; i < NumTotalRegs; i++) {
+			machine->WriteRegister(i, 0);
+		}
     // Initial program counter -- must be location of "Start"
-    machine->WriteRegister(PCReg, 0);
+    machine->WriteRegister(PCReg, (memIndex*256));
 
     // Need to also tell MIPS where next instruction is, because
     // of branch delay possibility
-    machine->WriteRegister(NextPCReg, 4);
+    machine->WriteRegister(NextPCReg, (memIndex*256) + 4);
 
    // Set the stack register to the end of the address space, where we
    // allocated the stack; but subtract off a bit, to make sure we don't
    // accidentally reference off the end!
-    machine->WriteRegister(StackReg, numPages * PageSize - 16);
+    machine->WriteRegister(StackReg, ((memIndex*256) + (numPages * PageSize) - 16));
     DEBUG('a', "Initializing stack register to %d\n", numPages * PageSize - 16);
 }
 
