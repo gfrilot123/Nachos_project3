@@ -48,8 +48,11 @@ class BitMap {
     void Print();		// Print contents of bitmap
     void IndividPrint();
     int FirstFit(int fileSize, int recurIndex);
-    void BestFit(int fileSize);
-    void WorstFit(int fileSize);
+    int BestFit(int fileSize, int recurIndex, int currentBest);
+    int WorstFit(int fileSize, int recurIndex, int currentWorst);
+    void setBestWorstDefault ();	//sets bestIndex and worstIndex to their 
+					//default values
+    void setMarks();
 
     
     // These aren't needed until FILESYS, when we will need to read and 
@@ -64,7 +67,9 @@ class BitMap {
 					//  multiple of the number of bits in
 					//  a word)
     unsigned int *map;			// bit storage
-    int pageArray[];
+
+    int bestIndex;	//where to set 999
+    int worstIndex;	//where to set 0
 };
 
 #endif // BITMAP_H

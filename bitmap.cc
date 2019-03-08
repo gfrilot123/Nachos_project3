@@ -129,7 +129,6 @@ BitMap::NumClear()
 void
 BitMap::Print()
 {
-    int numFree = 0;
     printf("Bitmap set:\n");
     for (int i = 0; i < numBits; i++)
     {//begin code changes by Chau Cao
@@ -149,19 +148,6 @@ BitMap::Print()
 // These aren't needed until the FILESYS assignment
 
 //begin code changes by Robert Knott
-//BitMap::IndividPrint
-//prints each bitmap section as Clear/Not Clear
-//meant for testing/debugging, not used in final
-void BitMap::IndividPrint()
-{
-    for(int r = 0; r < numBits; r++)
-    {
-	if(!Test(r))
-	    printf("MemMap(%d) is Clear\n", r);
-	else
-	    printf("MemMap(%d) is Not Clear\n", r);
-	}
-}
 
 //BitMap::FirstFit
 //finds the first set of free memory pages whose size can fit the fileSize of
@@ -178,8 +164,6 @@ int BitMap::FirstFit(int fileSize, int recurIndex)
     int firstAdd = 0;		//-First address seen that is available.  This value is
 				//returned and is used by the bitmap to tell where the
 				//executable file is stored in memory
-				//--FUNCTIONALITY CURRENTLY MISSING!--
-				//How to put a file onto memory?
 
     int secondAdd = 0;		//-Second address.  holds the bitmap address where the first
 				//taken bit is seen.  secondAdd - firstAdd = contigSize
@@ -193,31 +177,31 @@ int BitMap::FirstFit(int fileSize, int recurIndex)
 	return -1;							//end FirstFit
     }
 
-	for(int n = recurIndex; n < numBits; n++)  //search for the first available bit
-	{
-	    if(!Test(n))
-	    {
-		firstAdd = n;			//save the first available bitMap space
+    for(int n = recurIndex; n < numBits; n++)  //search for the first available bit
+    {
+	if(!Test(n))
+        {
+	    firstAdd = n;			//save the first available bitMap space
 						//as firstAdd
-		break;				//end the loop; go to next loop for secondAdd
-	    }
+            break;				//end the loop; go to next loop for secondAdd
 	}
+    }
 
-	for(int o = firstAdd; o < numBits; o++)  //search for the first bit that is no
+    for(int o = firstAdd; o < numBits; o++)  //search for the first bit that is no
 							//longer available.  Start search
 							//at firstAdd.
+    {
+	if(Test(o) || o == 31)
 	{
-	    if(Test(o) || o == 31)
-	    {
-		secondAdd = o;			//save the first taken bitMap space seen
+	    secondAdd = o;			//save the first taken bitMap space seen
 						//as secondAdd
-		break;				//end the loop; verify that there is enough
+	    break;				//end the loop; verify that there is enough
 						//space between firstAdd and secondAdd to fit
 						//file.
-	    }
 	}
+    }
 
-    contigSize = (secondAdd - firstAdd) + 1;	//calculate the contiguous memory space
+    contigSize = secondAdd - firstAdd;		//calculate the contiguous memory space
     printf("%d to %d is free, contiguous size = %d/%d\n", firstAdd, secondAdd, contigSize, numBits);
 
     if(fileSize <= contigSize)			//if the size of the file can fit into the
@@ -225,7 +209,9 @@ int BitMap::FirstFit(int fileSize, int recurIndex)
     {
 	printf("FILE ADDED TO MEMORY!\n");
 	//add file to memory
-	return firstAdd;			//end FirstFit; objective complete
+	return firstAdd;			//end FirstFit; return the first open memory
+							//address so addrspace knows where to
+							//add the file in memory
     }
     else					//if it cannot fit, see if it can
 	printf("CANNOT FIT INTO THIS SPACE!\n");	//keep going
@@ -237,10 +223,6 @@ int BitMap::FirstFit(int fileSize, int recurIndex)
 	FirstFit(fileSize, secondAdd);		//recursively call this function using
 							//secondAdd as the starting point
     }
-
-    //insert the file to the memory -OR- allow adderspace to add
-	//to the memory
-    //...
 }
 
 //BitMap::BestFit
@@ -248,17 +230,97 @@ int BitMap::FirstFit(int fileSize, int recurIndex)
 //the closest match to the fileSize of the file being passed in
 //if true, this puts the file in the memory
 //if false, ignore the file
-void BitMap::BestFit(int fileSize)
+//fileSize = the size of the file being passed in
+//recurIndex = the address of the last-seen index from a previous
+	//iteration of FirstFit.  Only used if the program encounters
+	//a contiguous space that ends before the last memory space.
+    //Default value is 0. --MUST BE 0 ON FIRST CALL--
+//currentBest = the size of the contiguous memory that is the currently
+	//best known fit for the file.
+    //Default value is 999.  --MUST BE 999 ON FIRST CALL--
+int BitMap::BestFit(int fileSize, int recurIndex, int currentBest)
 {
-    //traverse the entire bitmap
-	//-if there isn't enough total space available,
-	    //then ignore file
-    	//-if there is no contiguous memory space large
-	    //enough, then ignore file
-    //add the file to the memory that best fits the
-    //space of available memory
-	//-if there are two spaces that qualify as best, 
-	    //then enter into the first one
+    int firstAdd = 0;		//-First address seen that is available.  This value is
+				//returned and is used by the bitmap to tell where the
+				//executable file is stored in memory
+
+    int secondAdd = 0;		//-Second address.  holds the bitmap address where the first
+				//taken bit is seen.  secondAdd - firstAdd = contigSize
+    int contigSize = 0;		//-The size of contiguous free memory that FirstFit is looking
+				//at.  Must be at least fileSize for the function to allow the
+				//file to be entered into the memory
+    int tempSize = 0;
+    int tempIndex = 0;
+    //printf("RecurIndex = %d\n", recurIndex);  //print statement to verify the recurIndex
+    if(NumClear() < fileSize)  //if there isn't enough available total memory for the file,
+    {
+	printf("Insufficent Memory Remaining.  Ignoring File...\n");  //alert the user and
+	return -1;							//end BestFit
+    }
+
+    for(int n = recurIndex; n < numBits; n++)  //search for the first available bit
+    {
+	if(!Test(n))
+	{
+	    firstAdd = n;			//save the first available bitMap space
+						//as firstAdd
+	    break;				//end the loop; go to next loop for secondAdd
+	}
+    }
+
+    for(int o = firstAdd; o < numBits; o++)  //search for the first bit that is no
+							//longer available.  Start search
+							//at firstAdd.
+    {
+	if(Test(o) || o == 31)
+	{
+	    secondAdd = o;			//save the first taken bitMap space seen
+						//as secondAdd
+	    break;				//end the loop; verify that there is enough
+						//space between firstAdd and secondAdd to fit
+						//file.
+	}
+    }
+
+    contigSize = secondAdd - firstAdd;		//calculate the contiguous memory space
+    printf("%d to %d is free, contiguous size = %d/%d\n", firstAdd, secondAdd, contigSize, numBits);
+
+    if(contigSize >= fileSize)			//if the contiguous memory space can hold the file,
+    {
+	printf("contigSize >= fileSize...\n");
+	if(contigSize < currentBest)		//and if the space is smaller than the currently
+							//known best fit space,
+	{
+	    printf("contigSize < currentBest\n");
+	    tempSize = contigSize;		//set tempSize and tempIndex to the current size and
+	    tempIndex = firstAdd;		//index to use in future recursion and to recall later
+	    bestIndex = firstAdd;		//save the address in bestIndex in case it's the 
+							//final space checked
+	    printf("tempSize = %d, tempIndex = %d\n", tempSize, tempIndex);
+	}
+    }
+    else					//if the contiguous memory checked is not the 
+							//best fit for the file,
+    {
+	printf("NO CHANGE IN SIZE/INDEX.  MOVING ON\n");
+	tempSize = currentBest;			//reset tempSize and tempIndex as the old currentBest
+	tempIndex = bestIndex;				//and bestIndex respectively for the
+							//recursive call.
+    }
+
+    if(secondAdd < numBits-1)			//if secondAdd has not hit the end of
+							//the bitMap,
+    {
+	printf("NOT DONE!\n");
+	printf("---UPDATES: bestIndex = %d, currentBest = %d---\n", tempIndex, tempSize);
+	BestFit(fileSize, secondAdd, tempSize); //recursively call this function using
+							//secondAdd as the starting point
+    }
+    else
+    {
+	printf("FILE ADDED TO MEMORY ON PAGE %d!\n", bestIndex);
+	return bestIndex;
+    }
 }
 
 //BitMap::WorstFit
@@ -266,17 +328,110 @@ void BitMap::BestFit(int fileSize)
 //the largest size of free memory available.
 //if true, this puts the file in the memory
 //if false, ignore the file
-void BitMap::WorstFit(int fileSize)
+//fileSize = the size of the file being passed in
+//recurIndex = the address of the last-seen index from a previous
+	//iteration of FirstFit.  Only used if the program encounters
+	//a contiguous space that ends before the last memory space.
+    //Default value is 0. --MUST BE 0 ON FIRST CALL--
+//currentWorst = the size of the contiguous memory that is the current
+	//worst known fit for the file.
+int BitMap::WorstFit(int fileSize, int recurIndex, int currentWorst)
 {
-    //traverse the entire bitmap
-	//-if there isn't enough total space available,
-	    //then ignore file
-    	//-if there is no contiguous memory space large
-	    //enough, then ignore file
-    //add the file to the memory that has the largest
-    //contiguous space of free memory
-	//-if there are two spaces that qualify as largest, 
-	    //then enter into the first one
+    int firstAdd = 0;		//-First address seen that is available.  This value is
+				//returned and is used by the bitmap to tell where the
+				//executable file is stored in memory
+
+    int secondAdd = 0;		//-Second address.  holds the bitmap address where the first
+				//taken bit is seen.  secondAdd - firstAdd = contigSize
+    int contigSize = 0;		//-The size of contiguous free memory that FirstFit is looking
+				//at.  Must be at least fileSize for the function to allow the
+				//file to be entered into the memory
+    int tempSize = 0;
+    int tempIndex = 0;
+    //printf("RecurIndex = %d\n", recurIndex);  //print statement to verify the recurIndex
+    if(NumClear() < fileSize)  //if there isn't enough available total memory for the file,
+    {
+	printf("Insufficent Memory Remaining.  Ignoring File...\n");  //alert the user and
+	return -1;							//end WorstFit
+    }
+
+    for(int n = recurIndex; n < numBits; n++)  //search for the first available bit
+    {
+	if(!Test(n))
+	{
+	    firstAdd = n;			//save the first available bitMap space
+						//as firstAdd
+	    break;				//end the loop; go to next loop for secondAdd
+	}
+    }
+
+    for(int o = firstAdd; o < numBits; o++)  //search for the first bit that is no
+							//longer available.  Start search
+							//at firstAdd.
+    {
+	if(Test(o) || o == 31)
+	{
+	    secondAdd = o;			//save the first taken bitMap space seen
+						//as secondAdd
+	    break;				//end the loop; verify that there is enough
+						//space between firstAdd and secondAdd to fit
+						//file.
+	}
+    }
+
+    contigSize = secondAdd - firstAdd;		//calculate the contiguous memory space
+    printf("%d to %d is free, contiguous size = %d/%d\n", firstAdd, secondAdd, contigSize, numBits);
+
+    if(contigSize >= fileSize)			//if the contiguous memory space can hold the file,
+    {
+	printf("contigSize >= fileSize...\n");
+	if(contigSize > currentWorst)		//and if it's larger than the currently known
+							//largest memory space
+	{
+	    printf("contigSize < currentWorst\n");
+	    tempSize = contigSize;		//set tempSize and tempIndex to the current size and
+	    tempIndex = firstAdd;		//index to use in future recursion and to recall later
+	    worstIndex = firstAdd;		//save the address in bestIndex in case it's the 
+							//final space checked
+	    printf("tempSize = %d, tempIndex = %d\n", tempSize, tempIndex);
+	}
+    }
+    else					//if the contiguous memory checked is not the 
+							//best fit for the file,
+    {
+	tempSize = currentWorst;			//reset tempSize and tempIndex as the old currentBest
+	tempIndex = worstIndex;				//and bestIndex respectively for the
+							//recursive call.
+    }
+
+    if(secondAdd < numBits-1)			//if secondAdd has not hit the end of
+							//the bitMap,
+    {
+	printf("NOT DONE!\n");
+	printf("---UPDATES: worstIndex = %d, currentWorst = %d---\n", tempIndex, tempSize);
+	WorstFit(fileSize, secondAdd, tempSize); //recursively call this function using
+							//secondAdd as the starting point
+    }
+    else
+    {
+	printf("FILE ADDED TO MEMORY ON PAGE %d!\n", worstIndex);
+	return worstIndex;
+    }
+}
+
+void BitMap::setBestWorstDefault()  //sets best/worstIndex to default values
+{
+    bestIndex = 999;
+    worstIndex = 0;
+}
+
+void BitMap::setMarks()  //sets random marks to test for already-filled memory spaces
+{
+    Mark(8);
+    Mark(9);
+    Mark(10);
+    Mark(16);
+    Mark(23);
 }
 //end code changes by Robert Knott
 

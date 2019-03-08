@@ -95,12 +95,17 @@ AddrSpace::AddrSpace(OpenFile *executable)
 		int memIndex = 0;
 		//tempIndex variable used to iterate through loop an indices of main memory
 		int tempIndex;
+		memMap->setBestWorstDefault();
+		memMap->setMarks();
 
 		//Print out the bitmap before attempting to bring the user program into memory
 		memMap->Print();
 		printf("numPages = %d\n", numPages);
-		//memMap->FirstFit(numPages);
-		printf("%d\n", memMap->FirstFit(numPages, 0));
+	//vvvvv FirstFit, BestFit, and WorstFit vvvvv//
+			//Un-comment to run, should only run one at a time for now
+		//printf("%d\n", memMap->FirstFit(numPages, 0));
+		//printf("%d\n", memMap->BestFit(numPages, 0, 999));
+		//printf("%d\n", memMap->WorstFit(numPages, 0, 0));
 
 		//check if the number of pages needed is greater than the number of available frames
 		//in memory. If numPages is greater, produce output stating that and Exit()
